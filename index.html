@@ -20,7 +20,7 @@
     --accent-ink: #1a1608;
     --danger: #e6685f;
     --font-display: 'Space Grotesk', sans-serif;
-    --font-mono: 'Iansui', monospace;
+    --font-mono: 'iansui', monospace;
     --font-body: 'Inter', sans-serif;
     --font-iansui: 'Iansui', sans-serif;
   }
@@ -50,7 +50,9 @@
   .sync-badge{
     font-family:var(--font-mono); font-size:10px; color:var(--dim);
     display:flex; align-items:center; gap:5px; letter-spacing:0.04em;
+    max-width:150px;
   }
+  .sync-badge span:last-child{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:default; }
   .sync-dot{width:6px;height:6px;border-radius:50%; background:var(--muted); flex-shrink:0;}
   .sync-dot.saved{background:var(--accent); box-shadow:0 0 6px var(--accent); animation:blip 0.9s ease;}
   @keyframes blip{0%{transform:scale(1.6);} 100%{transform:scale(1);}}
@@ -59,7 +61,7 @@
     font-family:var(--font-mono); font-size:10px; color:var(--dim);
     letter-spacing:0.1em; text-transform:uppercase; margin:14px 0 8px 4px;
   }
-  .project-list, .folder-list{display:flex; flex-direction:column; gap:2px;}
+  .project-list{display:flex; flex-direction:column; gap:2px;}
   .side-item{
     display:flex; align-items:center; justify-content:space-between; gap:6px;
     padding:8px 10px; border-radius:5px; cursor:pointer;
@@ -81,8 +83,6 @@
     width:100%; text-align:left;
   }
   .add-btn:hover{color:var(--accent); border-color:var(--accent);}
-
-  .folders-block{margin-top:6px; flex:1; overflow-y:auto;}
 
   /* ---------- main ---------- */
   .main{flex:1; display:flex; flex-direction:column; min-width:0;}
@@ -227,12 +227,6 @@
     <div class="section-label">專案</div>
     <div class="project-list" id="projectList"></div>
     <button class="add-btn" id="addProjectBtn">+ 新增專案</button>
-
-    <div class="folders-block" id="foldersBlock" style="display:none;">
-      <div class="section-label">資料夾</div>
-      <div class="folder-list" id="folderList"></div>
-      <button class="add-btn" id="addFolderBtn">+ 新增資料夾</button>
-    </div>
   </aside>
 
   <!-- MAIN -->
@@ -263,11 +257,7 @@
     </div>
     <div class="editor-row">
       <label>標籤（用逗號分隔）</label>
-      <input type="text" id="editTags" placeholder="例如: 機器、金融、社會...">
-    </div>
-    <div class="editor-row">
-      <label>資料夾</label>
-      <select id="editFolder"><option value="">（不放入資料夾）</option></select>
+      <input type="text" id="editTags" placeholder="例如: 齒輪, 待辦, 靈感">
     </div>
     <div class="editor-row">
       <label>顏色</label>
@@ -299,9 +289,8 @@
 const CONFIG_KEY = 'notebook-github-config';
 const COLORS = ['#FFCE38','#FF6B6B','#4D96FF','#6BCB77','#B983FF','#FF9F45','#5AD8A6','#8D8D94'];
 
-let state = { projects: [], folders: [], notes: [] };
+let state = { projects: [], notes: [] };
 let currentProjectId = null;
-let currentFolderId = null; // null = show all in project
 let activeTagFilter = null;
 let editingNoteId = null;
 
@@ -325,7 +314,7 @@ async function loadData(){
     }
   });
   if(res.status === 404){
-    state = { projects: [], folders: [], notes: [] };
+    state = { projects: [], notes: [] };
     currentSha = null;
     return;
   }
@@ -337,16 +326,17 @@ async function loadData(){
   currentSha = json.sha;
   const text = json.content ? b64DecodeUtf8(json.content) : '';
   try{
-    state = text.trim() ? JSON.parse(text) : { projects: [], folders: [], notes: [] };
+    state = text.trim() ? JSON.parse(text) : { projects: [], notes: [] };
   }catch(e){
     console.log('檔案內容不是有效的 JSON，將視為空白筆記本。', e);
-    state = { projects: [], folders: [], notes: [] };
+    state = { projects: [], notes: [] };
   }
 }
 
-async function saveData(){
+async function saveData(retryOnConflict = true){
   const dot = document.getElementById('syncDot');
   const label = document.getElementById('syncLabel');
+  label.title = '';
   label.textContent = '儲存中...';
   try{
     const body = {
@@ -366,7 +356,19 @@ async function saveData(){
     });
     if(!res.ok){
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(`GitHub API 錯誤（${res.status}）：${errBody.message || res.statusText}`);
+      const msg = errBody.message || res.statusText;
+      // sha 衝突（例如檔案在 GitHub 上被其他方式改過）：重新抓一次最新 sha 再試一次
+      if(retryOnConflict && (res.status === 409 || (res.status === 422 && /sha/i.test(msg)))){
+        const getRes = await fetch(`${contentsUrl()}?ref=${encodeURIComponent(ghConfig.branch)}`, {
+          headers: { 'Authorization': `Bearer ${ghConfig.token}`, 'Accept': 'application/vnd.github+json' }
+        });
+        if(getRes.ok){
+          const latest = await getRes.json();
+          currentSha = latest.sha;
+          return saveData(false);
+        }
+      }
+      throw new Error(`GitHub API 錯誤（${res.status}）：${msg}`);
     }
     const json = await res.json();
     currentSha = json.content.sha;
@@ -375,7 +377,8 @@ async function saveData(){
     void dot.offsetWidth;
     dot.classList.add('saved');
   }catch(e){
-    label.textContent = '儲存失敗';
+    label.textContent = '儲存失敗：' + e.message;
+    label.title = e.message;
     console.error('GitHub save error:', e);
   }
 }
@@ -395,42 +398,8 @@ function renderProjects(){
       e.stopPropagation();
       if(await showConfirm(`刪除專案「${p.name}」？裡面的資料夾和筆記也會一併刪除。`)){
         state.projects = state.projects.filter(x => x.id !== p.id);
-        state.folders = state.folders.filter(f => f.projectId !== p.id);
         state.notes = state.notes.filter(n => n.projectId !== p.id);
-        if(currentProjectId === p.id){ currentProjectId = null; currentFolderId = null; }
-        saveData();
-        renderAll();
-      }
-    });
-    list.appendChild(div);
-  });
-}
-
-function renderFolders(){
-  const block = document.getElementById('foldersBlock');
-  const list = document.getElementById('folderList');
-  list.innerHTML = '';
-  if(!currentProjectId){ block.style.display = 'none'; return; }
-  block.style.display = 'block';
-
-  const allItem = document.createElement('div');
-  allItem.className = 'side-item' + (currentFolderId === null ? ' active' : '');
-  allItem.innerHTML = `<span class="label">全部筆記</span>`;
-  allItem.addEventListener('click', () => { currentFolderId = null; renderAll(); });
-  list.appendChild(allItem);
-
-  state.folders.filter(f => f.projectId === currentProjectId).forEach(f => {
-    const div = document.createElement('div');
-    div.className = 'side-item' + (f.id === currentFolderId ? ' active' : '');
-    div.innerHTML = `<span class="label"></span><span class="del-x">×</span>`;
-    div.querySelector('.label').textContent = f.name;
-    div.querySelector('.label').addEventListener('click', () => { currentFolderId = f.id; renderAll(); });
-    div.querySelector('.del-x').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if(await showConfirm(`刪除資料夾「${f.name}」？裡面的筆記會回到「全部筆記」。`)){
-        state.folders = state.folders.filter(x => x.id !== f.id);
-        state.notes.forEach(n => { if(n.folderId === f.id) n.folderId = null; });
-        if(currentFolderId === f.id) currentFolderId = null;
+        if(currentProjectId === p.id){ currentProjectId = null; }
         saveData();
         renderAll();
       }
@@ -450,9 +419,8 @@ function renderHeader(){
     return;
   }
   const proj = state.projects.find(p => p.id === currentProjectId);
-  const folder = state.folders.find(f => f.id === currentFolderId);
   title.textContent = proj ? proj.name : '';
-  sub.textContent = folder ? `資料夾：${folder.name}` : '全部筆記';
+  sub.textContent = '全部筆記';
   newBtn.style.display = 'inline-block';
 }
 
@@ -460,7 +428,6 @@ function getVisibleNotes(){
   if(!currentProjectId) return [];
   return state.notes.filter(n => {
     if(n.projectId !== currentProjectId) return false;
-    if(currentFolderId !== null && n.folderId !== currentFolderId) return false;
     if(activeTagFilter && !(n.tags || []).includes(activeTagFilter)) return false;
     return true;
   });
@@ -470,8 +437,7 @@ function renderTagFilters(){
   const row = document.getElementById('tagFilterRow');
   row.innerHTML = '';
   if(!currentProjectId) return;
-  const scoped = state.notes.filter(n => n.projectId === currentProjectId &&
-    (currentFolderId === null || n.folderId === currentFolderId));
+  const scoped = state.notes.filter(n => n.projectId === currentProjectId);
   const tagSet = new Set();
   scoped.forEach(n => (n.tags||[]).forEach(t => tagSet.add(t)));
   if(tagSet.size === 0) return;
@@ -496,7 +462,7 @@ function renderNoteGrid(){
   }
   const notes = getVisibleNotes();
   if(notes.length === 0){
-    grid.innerHTML = '<div class="empty-state">這裡還沒有筆記，按右上角「新增筆記」開始寫。</div>';
+    grid.innerHTML = '<div class="empty-state">這裡還沒有筆記，按右上角「+ 新增筆記」開始寫。</div>';
     return;
   }
   notes.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0)).forEach(n => {
@@ -525,16 +491,6 @@ function renderNoteGrid(){
   });
 }
 
-function renderFolderSelectOptions(){
-  const sel = document.getElementById('editFolder');
-  sel.innerHTML = '<option value="">（不放入資料夾）</option>';
-  state.folders.filter(f => f.projectId === currentProjectId).forEach(f => {
-    const opt = document.createElement('option');
-    opt.value = f.id; opt.textContent = f.name;
-    sel.appendChild(opt);
-  });
-}
-
 function renderColorSwatches(selected){
   const wrap = document.getElementById('colorSwatches');
   wrap.innerHTML = '';
@@ -553,7 +509,6 @@ function renderColorSwatches(selected){
 
 function renderAll(){
   renderProjects();
-  renderFolders();
   renderHeader();
   renderTagFilters();
   renderNoteGrid();
@@ -563,28 +518,24 @@ function renderAll(){
 
 function selectProject(id){
   currentProjectId = id;
-  currentFolderId = null;
   activeTagFilter = null;
   renderAll();
 }
 
 function openEditor(noteId){
   editingNoteId = noteId;
-  renderFolderSelectOptions();
   const deleteBtn = document.getElementById('deleteNoteBtn');
   if(noteId){
     const n = state.notes.find(x => x.id === noteId);
     document.getElementById('editTitle').value = n.title || '';
     document.getElementById('editBody').value = n.body || '';
     document.getElementById('editTags').value = (n.tags||[]).join(', ');
-    document.getElementById('editFolder').value = n.folderId || '';
     renderColorSwatches(n.color || COLORS[0]);
     deleteBtn.style.display = 'inline-block';
   } else {
     document.getElementById('editTitle').value = '';
     document.getElementById('editBody').value = '';
     document.getElementById('editTags').value = '';
-    document.getElementById('editFolder').value = currentFolderId || '';
     renderColorSwatches(COLORS[0]);
     deleteBtn.style.display = 'none';
   }
@@ -600,7 +551,6 @@ function saveNoteFromEditor(){
   const title = document.getElementById('editTitle').value.trim();
   const body = document.getElementById('editBody').value.trim();
   const tags = document.getElementById('editTags').value.split(',').map(t => t.trim()).filter(Boolean);
-  const folderId = document.getElementById('editFolder').value || null;
   const selectedSwatch = document.querySelector('.swatch.selected');
   const color = selectedSwatch ? selectedSwatch.dataset.color : COLORS[0];
 
@@ -608,11 +558,11 @@ function saveNoteFromEditor(){
 
   if(editingNoteId){
     const n = state.notes.find(x => x.id === editingNoteId);
-    n.title = title; n.body = body; n.tags = tags; n.folderId = folderId; n.color = color;
+    n.title = title; n.body = body; n.tags = tags; n.color = color;
     n.updatedAt = Date.now();
   } else {
     state.notes.push({
-      id: uid(), projectId: currentProjectId, folderId, title, body, tags, color,
+      id: uid(), projectId: currentProjectId, title, body, tags, color,
       updatedAt: Date.now()
     });
   }
@@ -695,17 +645,6 @@ document.getElementById('addProjectBtn').addEventListener('click', async () => {
   selectProject(p.id);
 });
 
-document.getElementById('addFolderBtn').addEventListener('click', async () => {
-  if(!currentProjectId) return;
-  const name = await showPrompt('新增資料夾', '資料夾名稱');
-  if(!name) return;
-  const f = { id: uid(), projectId: currentProjectId, name: name.trim() };
-  state.folders.push(f);
-  saveData();
-  currentFolderId = f.id;
-  renderAll();
-});
-
 document.getElementById('disconnectBtn').addEventListener('click', async () => {
   if(await showConfirm('中斷與 GitHub 的連線？（不會刪除 repo 裡的資料，只是這台電腦要重新輸入設定）')){
     localStorage.removeItem(CONFIG_KEY);
@@ -749,7 +688,7 @@ async function connectAndLoad(config){
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     currentProjectId = state.projects.length > 0 ? state.projects[0].id : null;
-    currentFolderId = null; activeTagFilter = null;
+    activeTagFilter = null;
     renderAll();
   }catch(e){
     ghConfig = null;
