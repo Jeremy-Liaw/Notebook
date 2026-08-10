@@ -20,7 +20,7 @@
     --accent-ink: #1a1608;
     --danger: #e6685f;
     --font-display: 'Space Grotesk', sans-serif;
-    --font-mono: 'iansui', monospace;
+    --font-mono: 'Iansui', monospace;
     --font-body: 'Inter', sans-serif;
     --font-iansui: 'Iansui', sans-serif;
   }
@@ -161,7 +161,7 @@
     background:var(--bg); border:1px solid var(--border-bright); color:var(--text);
     padding:10px 12px; border-radius:5px; font-size:14px;
   }
-  .editor-row textarea{min-height:280px; resize:vertical; line-height:1.6; font-family:var(--font-body);}
+  .editor-row textarea{min-height:400px; resize:vertical; line-height:1.6; font-family:var(--font-body);}
   .editor-row input:focus, .editor-row textarea:focus, .editor-row select:focus{
     outline:2px solid var(--accent); outline-offset:1px;
   }
@@ -660,7 +660,7 @@ document.getElementById('panelCloseBtn').addEventListener('click', closeEditor);
 document.getElementById('cancelEditBtn').addEventListener('click', closeEditor);
 document.getElementById('saveNoteBtn').addEventListener('click', saveNoteFromEditor);
 document.getElementById('overlay').addEventListener('click', (e) => {
-  if(e.target.id === 'overlay') closeEditor();
+  if(e.target.id === 'overlay') saveNoteFromEditor();
 });
 document.getElementById('deleteNoteBtn').addEventListener('click', async () => {
   if(!editingNoteId) return;
