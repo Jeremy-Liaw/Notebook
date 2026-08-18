@@ -1,28 +1,49 @@
 <!DOCTYPE html>
+<!--
+  Notebook (GitHub 版)
+  ====================
+  單一 HTML 檔案的筆記系統，資料透過 GitHub Contents API 存在你自己的 repo 裡。
+
+  想自己改東西的話，可以先找這幾個地方：
+  - <style> 開頭的 :root{ ... } → 顏色、字體
+  - JS 裡的 COLORS 陣列 → 筆記卡片可選的顏色
+  - .textarea-wrap.expanded textarea{ ... } → 放大模式的方格線大小
+  - loadData() / saveData() → 跟 GitHub API 溝通的地方
+  - 畫面上找不到清楚英文 id 的地方，通常旁邊都有中文註解說明用途
+-->
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Notebook GitHub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Iansui&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=Iansui&display=swap" rel="stylesheet">
 <style>
+  /* 顏色與字體集中放在這裡，改這裡就會全站套用 */
   :root{
-    --bg: #0d0d0f;
-    --panel: #17171a;
-    --panel-alt: #1f1f23;
-    --border: #2d2d32;
-    --border-bright: #3e3e45;
-    --text: #eceef0;
-    --muted: #8d8d94;
-    --dim: #55555c;
-    --accent: #FFCE38;
-    --accent-ink: #1a1608;
-    --danger: #e6685f;
-    --font-display: 'Space Grotesk', sans-serif;
-    --font-mono: 'Iansui', monospace;
-    --font-body: 'Inter', sans-serif;
-    --font-iansui: 'Iansui', sans-serif;
+    /* ---- 背景／面板／邊框（由深到淺）---- */
+    --bg: #0d0d0f;           /* 最底層背景 */
+    --panel: #17171a;        /* 側邊欄、卡片、彈出視窗的底色 */
+    --panel-alt: #1f1f23;    /* 比 panel 再亮一點，用在 hover 效果 */
+    --border: #2d2d32;       /* 一般分隔線 */
+    --border-bright: #3e3e45;/* 比較明顯的邊框（輸入框、按鈕外框）*/
+
+    /* ---- 文字顏色 ---- */
+    --text: #eceef0;   /* 主要文字 */
+    --muted: #8d8d94;  /* 次要文字 */
+    --dim: #55555c;    /* 更淡的提示文字 */
+
+    /* ---- 主題色：想換整體配色主要改這兩個 ---- */
+    --accent: #FFCE38;      /* 主色（金黃色），按鈕、標籤、強調用 */
+    --accent-ink: #1a1608;  /* 疊在 accent 底色上的深色文字 */
+
+    --danger: #e6685f; /* 刪除／錯誤訊息用的紅色 */
+
+    /* ---- 字體：想換字體改這三個變數就好 ---- */
+    --font-display: 'Space Grotesk', sans-serif; /* 標題用 */
+    --font-mono: 'Iansui', monospace;            /* 標籤、按鈕、小字用 */
+    --font-body: 'Inter', sans-serif;            /* 筆記內文用 */
+    --font-iansui: 'Iansui', sans-serif;         /* 確定／儲存按鈕專用 */
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   body{
@@ -39,7 +60,8 @@
 
   /* ---------- sidebar ---------- */
   .sidebar{
-    width:250px; flex-shrink:0;
+    width:250px; /* 側邊欄寬度，改這個數字就能調寬窄 */
+    flex-shrink:0;
     background:var(--panel);
     border-right:1px solid var(--border);
     display:flex; flex-direction:column;
@@ -149,7 +171,8 @@
   }
   .overlay.show{display:flex;}
   .editor-panel{
-    width:820px; max-width:94vw; max-height:90vh; background:var(--panel);
+    width:820px; /* 筆記編輯視窗的寬度（新增/新增資料夾的小視窗有自己另外設定，不受這裡影響）*/
+    max-width:94vw; max-height:90vh; background:var(--panel);
     border:1px solid var(--border-bright); border-radius:10px;
     padding:28px; display:flex; flex-direction:column; gap:16px; overflow-y:auto;
   }
@@ -161,7 +184,77 @@
     background:var(--bg); border:1px solid var(--border-bright); color:var(--text);
     padding:10px 12px; border-radius:5px; font-size:14px;
   }
-  .editor-row textarea{min-height:440px; resize:vertical; line-height:1.6; font-family:var(--font-body);}
+  /* 標題框：拿掉外框跟底色，看起來就是一行大字，直接點下去打字 */
+  .editor-row input.title-input{
+    background:transparent; border:none; padding:6px 2px;
+    font-family:var(--font-display); font-weight:700; font-size:26px; color:var(--text);
+  }
+  .editor-row input.title-input::placeholder{ color:var(--dim); }
+  .editor-row input.title-input:focus{ outline:none; }
+
+  /* ---------- 標籤選擇器（編輯視窗裡用，取代原本打字輸入逗號分隔的做法）---------- */
+  .tag-picker{display:flex; flex-direction:column; gap:8px;}
+  .selected-tags{display:flex; flex-wrap:wrap; gap:6px;}
+  .tag-chip-editable{
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--panel-alt); border:1px solid var(--border-bright); color:var(--text);
+    font-family:var(--font-mono); font-size:12px; padding:5px 6px 5px 10px; border-radius:12px;
+  }
+  .tag-chip-editable button{
+    background:none; border:none; color:var(--dim); cursor:pointer; font-size:13px; line-height:1; padding:2px;
+  }
+  .tag-chip-editable button:hover{color:var(--danger);}
+  .tag-add-row{position:relative;}
+  .tag-suggestions{
+    position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:10;
+    background:var(--panel-alt); border:1px solid var(--border-bright); border-radius:6px;
+    max-height:180px; overflow-y:auto; display:none;
+  }
+  .tag-suggestions.show{display:block;}
+  .tag-suggestion-item{ padding:9px 12px; font-size:13px; color:var(--text); cursor:pointer; }
+  .tag-suggestion-item:hover{background:var(--bg);}
+  .tag-suggestion-item.create-new{color:var(--accent); font-family:var(--font-mono); font-size:12px;}
+
+  .editor-row textarea{width:100%; min-height:440px; /* 一般（未放大）狀態下筆記內容框的高度 */ resize:vertical; line-height:1.6; font-family:var(--font-body);}
+
+  .textarea-wrap{position:relative; width:100%;}
+  .expand-btn{
+    position:absolute; top:8px; right:8px; z-index:2;
+    background:var(--panel-alt); border:1px solid var(--border-bright); color:var(--muted);
+    width:28px; height:28px; border-radius:5px; cursor:pointer; font-size:14px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .expand-btn:hover{color:var(--accent); border-color:var(--accent);}
+  .textarea-wrap textarea{ padding-right:44px; }
+
+  .expand-title-bar{ display:none; } /* 平常隱藏，只有放大模式才顯示這個筆記標題 */
+
+  /* 放大按鈕按下去之後，文字框變成蓋滿整個瀏覽器視窗（留 20px 邊界），
+     不是叫作業系統進入電腦全螢幕模式 */
+  .textarea-wrap.expanded{
+    position:fixed; inset:20px; /* 四邊各留 20px，改這個數字可以調邊界寬窄 */
+    z-index:300; width:auto; height:auto;
+    background:var(--panel); border:1px solid var(--border-bright); border-radius:10px;
+    display:flex; flex-direction:column; padding:0;
+  }
+  .textarea-wrap.expanded .expand-title-bar{
+    display:block; flex-shrink:0;
+    font-family:var(--font-display); font-weight:700; font-size:32px; color:var(--text);
+    padding:24px 60px 8px 24px;
+  }
+  .textarea-wrap.expanded textarea{
+    flex:1; width:100%; height:100%; min-height:0; resize:none;
+    font-size:20px; line-height:36px; padding:8px 60px 24px 24px; border-radius:10px;
+    background-color:var(--bg);
+    /* 方格線背景：兩條 linear-gradient 疊出橫線+直線，36px 是每格的大小，
+       想要格子更大/更小，改下面 background-size 那個 36px 36px 就好（記得跟上面 line-height 搭配）*/
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size:36px 36px;
+    background-attachment:local;
+  }
+  .textarea-wrap.expanded .expand-btn{ top:20px; right:20px; }
   .editor-row input:focus, .editor-row textarea:focus, .editor-row select:focus{
     outline:2px solid var(--accent); outline-offset:1px;
   }
@@ -248,16 +341,25 @@
   <div class="editor-panel">
     <div class="panel-close-row"><button class="panel-close" id="panelCloseBtn">×</button></div>
     <div class="editor-row">
-      <label>標題</label>
-      <input type="text" id="editTitle" placeholder="筆記標題">
+      <input type="text" id="editTitle" class="title-input" placeholder="無標題筆記" autocomplete="off">
     </div>
     <div class="editor-row">
       <label>內容</label>
-      <textarea id="editBody" placeholder="寫點什麼..."></textarea>
+      <div class="textarea-wrap" id="textareaWrap">
+        <div class="expand-title-bar" id="expandTitleBar"></div>
+        <textarea id="editBody" placeholder="寫點什麼..."></textarea>
+        <button type="button" id="expandBtn" class="expand-btn" title="放大">⤢</button>
+      </div>
     </div>
     <div class="editor-row">
-      <label>標籤（用逗號分隔）</label>
-      <input type="text" id="editTags" placeholder="例如: 齒輪, 待辦, 靈感">
+      <label>標籤</label>
+      <div class="tag-picker" id="tagPicker">
+        <div class="selected-tags" id="selectedTags"></div>
+        <div class="tag-add-row">
+          <input type="text" id="tagAddInput" placeholder="輸入新標籤，或從下面選擇現有標籤" autocomplete="off">
+          <div class="tag-suggestions" id="tagSuggestions"></div>
+        </div>
+      </div>
     </div>
     <div class="editor-row">
       <label>顏色</label>
@@ -287,25 +389,31 @@
 
 <script>
 const CONFIG_KEY = 'notebook-github-config';
+// 筆記卡片可以選的顏色，順序就是編輯視窗裡色塊排列的順序，
+// 想增加/減少/改顏色，直接改這個陣列（要用 #RRGGBB 格式）
 const COLORS = ['#FFCE38','#FF6B6B','#4D96FF','#6BCB77','#B983FF','#FF9F45','#5AD8A6','#8D8D94'];
 
 let state = { projects: [], notes: [] };
 let currentProjectId = null;
 let activeTagFilter = null;
 let editingNoteId = null;
+let editingTags = []; // 目前編輯視窗裡已選的標籤（標籤選擇器用）
 
 let ghConfig = null; // { owner, repo, path, branch, token }
 let currentSha = null; // GitHub blob sha of the currently loaded file, null if file doesn't exist yet
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
+// base64 編碼/解碼，多繞一層 unescape/encodeURIComponent 是為了讓中文字也能正確編碼
 function b64EncodeUtf8(str){ return btoa(unescape(encodeURIComponent(str))); }
 function b64DecodeUtf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g, '')))); }
 
+// 組出 GitHub Contents API 的網址，owner/repo/path 來自「連接 GitHub」畫面輸入的設定（ghConfig）
 function contentsUrl(){
   return `https://api.github.com/repos/${ghConfig.owner}/${ghConfig.repo}/contents/${ghConfig.path}`;
 }
 
+// 從 GitHub repo 讀取筆記檔案，整包解析成 state（projects + notes）
 async function loadData(){
   const res = await fetch(`${contentsUrl()}?ref=${encodeURIComponent(ghConfig.branch)}`, {
     headers: {
@@ -314,6 +422,7 @@ async function loadData(){
     }
   });
   if(res.status === 404){
+    // 檔案還不存在（第一次使用）→ 當作空白筆記本，之後存檔時會自動建立檔案
     state = { projects: [], notes: [] };
     currentSha = null;
     return;
@@ -323,7 +432,7 @@ async function loadData(){
     throw new Error(`GitHub API 錯誤（${res.status}）：${body.message || res.statusText}`);
   }
   const json = await res.json();
-  currentSha = json.sha;
+  currentSha = json.sha; // 記住這個檔案目前的版本號（sha），存檔時要附上才能更新
   const text = json.content ? b64DecodeUtf8(json.content) : '';
   try{
     state = text.trim() ? JSON.parse(text) : { projects: [], notes: [] };
@@ -333,6 +442,7 @@ async function loadData(){
   }
 }
 
+// 把目前的 state 整包寫回 GitHub repo 裡的那個檔案
 async function saveData(retryOnConflict = true){
   const dot = document.getElementById('syncDot');
   const label = document.getElementById('syncLabel');
@@ -393,7 +503,7 @@ function renderProjects(){
     div.className = 'side-item' + (p.id === currentProjectId ? ' active' : '');
     div.innerHTML = `<span class="label"></span><span class="del-x">×</span>`;
     div.querySelector('.label').textContent = p.name;
-    div.querySelector('.label').addEventListener('click', () => selectProject(p.id));
+    div.addEventListener('click', () => selectProject(p.id));
     div.querySelector('.del-x').addEventListener('click', async (e) => {
       e.stopPropagation();
       if(await showConfirm(`刪除專案「${p.name}」？裡面的資料夾和筆記也會一併刪除。`)){
@@ -524,33 +634,38 @@ function selectProject(id){
 
 function openEditor(noteId){
   editingNoteId = noteId;
+  collapseTextarea();
   const deleteBtn = document.getElementById('deleteNoteBtn');
   if(noteId){
     const n = state.notes.find(x => x.id === noteId);
     document.getElementById('editTitle').value = n.title || '';
     document.getElementById('editBody').value = n.body || '';
-    document.getElementById('editTags').value = (n.tags||[]).join(', ');
+    editingTags = [...(n.tags || [])];
     renderColorSwatches(n.color || COLORS[0]);
     deleteBtn.style.display = 'inline-block';
   } else {
     document.getElementById('editTitle').value = '';
     document.getElementById('editBody').value = '';
-    document.getElementById('editTags').value = '';
+    editingTags = [];
     renderColorSwatches(COLORS[0]);
     deleteBtn.style.display = 'none';
   }
+  document.getElementById('tagAddInput').value = '';
+  renderTagChips();
+  document.getElementById('tagSuggestions').classList.remove('show');
   document.getElementById('overlay').classList.add('show');
 }
 
 function closeEditor(){
   document.getElementById('overlay').classList.remove('show');
+  collapseTextarea();
   editingNoteId = null;
 }
 
 function saveNoteFromEditor(){
   const title = document.getElementById('editTitle').value.trim();
   const body = document.getElementById('editBody').value.trim();
-  const tags = document.getElementById('editTags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const tags = editingTags;
   const selectedSwatch = document.querySelector('.swatch.selected');
   const color = selectedSwatch ? selectedSwatch.dataset.color : COLORS[0];
 
@@ -571,8 +686,87 @@ function saveNoteFromEditor(){
   renderAll();
 }
 
+/* ---------------- tag picker (chip-based tag selection in the editor) ---------------- */
+
+function getAvailableTags(){
+  const set = new Set();
+  state.notes.forEach(n => {
+    if(n.projectId === currentProjectId) (n.tags || []).forEach(t => set.add(t));
+  });
+  return [...set].filter(t => !editingTags.includes(t)).sort();
+}
+
+function renderTagChips(){
+  const wrap = document.getElementById('selectedTags');
+  wrap.innerHTML = '';
+  editingTags.forEach(t => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip-editable';
+    chip.innerHTML = `<span></span><button type="button" aria-label="移除標籤">×</button>`;
+    chip.querySelector('span').textContent = '#' + t;
+    chip.querySelector('button').addEventListener('click', () => {
+      editingTags = editingTags.filter(x => x !== t);
+      renderTagChips();
+      renderTagSuggestions();
+    });
+    wrap.appendChild(chip);
+  });
+}
+
+function addTag(raw){
+  const t = raw.trim();
+  if(!t) return;
+  if(!editingTags.some(x => x.toLowerCase() === t.toLowerCase())) editingTags.push(t);
+  document.getElementById('tagAddInput').value = '';
+  renderTagChips();
+  renderTagSuggestions();
+}
+
+function renderTagSuggestions(){
+  const input = document.getElementById('tagAddInput');
+  const box = document.getElementById('tagSuggestions');
+  const query = input.value.trim().toLowerCase();
+  const available = getAvailableTags().filter(t => t.toLowerCase().includes(query));
+  box.innerHTML = '';
+  available.slice(0, 8).forEach(t => {
+    const item = document.createElement('div');
+    item.className = 'tag-suggestion-item';
+    item.textContent = '#' + t;
+    item.addEventListener('mousedown', (e) => { e.preventDefault(); addTag(t); });
+    box.appendChild(item);
+  });
+  const exactExists = available.some(t => t.toLowerCase() === query) ||
+    editingTags.some(t => t.toLowerCase() === query);
+  if(query && !exactExists){
+    const create = document.createElement('div');
+    create.className = 'tag-suggestion-item create-new';
+    create.textContent = `+ 新增標籤「${input.value.trim()}」`;
+    create.addEventListener('mousedown', (e) => { e.preventDefault(); addTag(input.value); });
+    box.appendChild(create);
+  }
+  box.classList.toggle('show', box.children.length > 0);
+}
+
+document.getElementById('tagAddInput').addEventListener('input', renderTagSuggestions);
+document.getElementById('tagAddInput').addEventListener('focus', renderTagSuggestions);
+document.getElementById('tagAddInput').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); addTag(e.target.value); }
+  if(e.key === 'Backspace' && e.target.value === '' && editingTags.length){
+    editingTags.pop();
+    renderTagChips();
+    renderTagSuggestions();
+  }
+});
+document.getElementById('tagAddInput').addEventListener('blur', () => {
+  setTimeout(() => document.getElementById('tagSuggestions').classList.remove('show'), 150);
+});
+
 
 /* ---------------- mini dialog (replaces window.prompt / window.confirm) ---------------- */
+// 瀏覽器內建的 prompt()/confirm() 樣式沒辦法自訂、也擋不掉，
+// 所以自己做了這兩個函式，畫面用 #miniDialogOverlay 那個彈出視窗，
+// 用法是 await showPrompt(標題, placeholder) 或 await showConfirm(訊息)，
+// 用起來跟原生的 prompt/confirm 很像，但回傳的是 Promise，要搭配 async/await 使用
 
 function showPrompt(title, placeholder){
   return new Promise((resolve) => {
@@ -656,6 +850,33 @@ document.getElementById('disconnectBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('newNoteBtn').addEventListener('click', () => openEditor(null));
+
+function collapseTextarea(){
+  const wrap = document.getElementById('textareaWrap');
+  wrap.classList.remove('expanded');
+  document.getElementById('expandBtn').textContent = '⤢';
+  document.getElementById('expandBtn').title = '放大';
+}
+
+document.getElementById('expandBtn').addEventListener('click', () => {
+  const wrap = document.getElementById('textareaWrap');
+  const btn = document.getElementById('expandBtn');
+  const nowExpanded = wrap.classList.toggle('expanded');
+  btn.textContent = nowExpanded ? '⤡' : '⤢';
+  btn.title = nowExpanded ? '縮小' : '放大';
+  if(nowExpanded){
+    const titleVal = document.getElementById('editTitle').value.trim();
+    document.getElementById('expandTitleBar').textContent = titleVal || '（無標題）';
+    document.getElementById('editBody').focus();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && document.getElementById('textareaWrap').classList.contains('expanded')){
+    collapseTextarea();
+  }
+});
+
 document.getElementById('panelCloseBtn').addEventListener('click', closeEditor);
 document.getElementById('cancelEditBtn').addEventListener('click', closeEditor);
 document.getElementById('saveNoteBtn').addEventListener('click', saveNoteFromEditor);
@@ -673,6 +894,9 @@ document.getElementById('deleteNoteBtn').addEventListener('click', async () => {
 });
 
 /* ---------------- connect flow ---------------- */
+// 「連接 GitHub」畫面填的帳號/repo/檔案路徑/分支/Token，
+// 存在這台電腦瀏覽器的 localStorage（CONFIG_KEY 這個 key），
+// 不會被寫進 repo，所以每台電腦、每個瀏覽器都要各自輸入一次
 
 async function connectAndLoad(config){
   const errEl = document.getElementById('ghError');
