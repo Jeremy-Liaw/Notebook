@@ -7,7 +7,7 @@
   想自己改東西的話，可以先找這幾個地方：
   - <style> 開頭的 :root{ ... } → 顏色、字體
   - JS 裡的 COLORS 陣列 → 筆記卡片可選的顏色
-  - .textarea-wrap.expanded textarea{ ... } → 放大模式的方格線大小
+  - .full-editor-textarea{ ... } → 編輯畫面的方格線大小
   - loadData() / saveData() → 跟 GitHub API 溝通的地方
   - 畫面上找不到清楚英文 id 的地方，通常旁邊都有中文註解說明用途
 -->
@@ -27,6 +27,7 @@
     --panel-alt: #1f1f23;    /* 比 panel 再亮一點，用在 hover 效果 */
     --border: #2d2d32;       /* 一般分隔線 */
     --border-bright: #3e3e45;/* 比較明顯的邊框（輸入框、按鈕外框）*/
+    --grid-line: rgba(255,255,255,0.045); /* 編輯畫面方格線顏色，故意調得很暗，避免跟字搶視覺 */
 
     /* ---- 文字顏色 ---- */
     --text: #eceef0;   /* 主要文字 */
@@ -116,6 +117,13 @@
   }
   .main-title{font-family:var(--font-display); font-weight:700; font-size:20px;}
   .main-sub{font-family:var(--font-mono); font-size:11px; color:var(--dim); margin-top:4px;}
+  .main-header-actions{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .search-input{
+    background:var(--panel); border:1px solid var(--border-bright); color:var(--text);
+    font-size:13px; padding:9px 12px; border-radius:6px; width:220px;
+  }
+  .search-input::placeholder{ color:var(--dim); }
+  .search-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
   .new-note-btn{
     background:var(--accent); color:var(--accent-ink); border:none;
     font-weight:700; font-size:13px; padding:10px 18px; border-radius:6px; cursor:pointer;
@@ -139,6 +147,7 @@
     align-content:start;
   }
   .note-card{
+    position:relative;
     background:var(--panel); border:1px solid var(--border);
     border-left:4px solid var(--card-color, var(--accent));
     border-radius:7px; padding:14px 16px; cursor:pointer;
@@ -146,7 +155,7 @@
     transition:border-color .15s ease;
   }
   .note-card:hover{border-color:var(--border-bright);}
-  .note-card-title{font-family:var(--font-display); font-weight:700; font-size:14px;}
+  .note-card-title{font-family:var(--font-display); font-weight:700; font-size:14px; padding-right:22px;}
   .note-card-body{
     font-size:13px; color:var(--muted); line-height:1.5;
     display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
@@ -158,41 +167,75 @@
   }
   .note-card-meta{font-family:var(--font-mono); font-size:10px; color:var(--dim); margin-top:2px;}
 
+  /* 釘選按鈕：卡片右上角，平常淡淡的，釘選後變成主色並轉個角度 */
+  .pin-btn{
+    position:absolute; top:10px; right:10px; z-index:1;
+    background:none; border:none; cursor:pointer;
+    font-size:14px; line-height:1; padding:2px;
+    opacity:0.3; filter:grayscale(1);
+    transition:opacity .15s ease, filter .15s ease, transform .15s ease;
+  }
+  .note-card:hover .pin-btn{ opacity:0.75; filter:grayscale(0.4); }
+  .pin-btn.pinned{ opacity:1; filter:none; transform:rotate(-20deg); }
+
   .empty-state{
     grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--dim);
     font-family:var(--font-mono); font-size:13px;
   }
 
-  /* ---------- editor panel ---------- */
-  .overlay{
-    position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none;
-    align-items:center; justify-content:center; z-index:100;
-    padding:24px;
+  /* ---------- 全畫面編輯（取代原本的小彈出視窗）---------- */
+  .full-editor{
+    position:fixed; inset:0; z-index:250; background:var(--bg);
+    display:none; flex-direction:column;
   }
-  .overlay.show{display:flex;}
-  .editor-panel{
-    width:820px; /* 筆記編輯視窗的寬度（新增/新增資料夾的小視窗有自己另外設定，不受這裡影響）*/
-    max-width:94vw; max-height:90vh; background:var(--panel);
-    border:1px solid var(--border-bright); border-radius:10px;
-    padding:28px; display:flex; flex-direction:column; gap:16px; overflow-y:auto;
-  }
-  .editor-row{display:flex; flex-direction:column; gap:6px;}
-  .editor-row label{
-    font-family:var(--font-mono); font-size:11px; color:var(--dim); letter-spacing:0.05em;
-  }
-  .editor-row input[type=text], .editor-row textarea, .editor-row select{
-    background:var(--bg); border:1px solid var(--border-bright); color:var(--text);
-    padding:10px 12px; border-radius:5px; font-size:14px;
-  }
-  /* 標題框：拿掉外框跟底色，看起來就是一行大字，直接點下去打字 */
-  .editor-row input.title-input{
-    background:transparent; border:none; padding:6px 2px;
-    font-family:var(--font-display); font-weight:700; font-size:26px; color:var(--text);
-  }
-  .editor-row input.title-input::placeholder{ color:var(--dim); }
-  .editor-row input.title-input:focus{ outline:none; }
+  .full-editor.show{ display:flex; }
 
-  /* ---------- 標籤選擇器（編輯視窗裡用，取代原本打字輸入逗號分隔的做法）---------- */
+  .full-editor-topbar{
+    display:flex; align-items:center; gap:16px;
+    padding:16px 24px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .full-editor-close{
+    background:none; border:1px solid var(--border-bright); color:var(--muted);
+    width:32px; height:32px; border-radius:6px; cursor:pointer; font-size:18px; flex-shrink:0;
+  }
+  .full-editor-close:hover{ color:var(--text); border-color:var(--text); }
+
+  /* 標題：拿掉外框跟底色，看起來就是一行大字，直接點下去打字 */
+  .title-input-full{
+    flex:1; min-width:0;
+    background:transparent; border:none; outline:none;
+    font-family:var(--font-display); font-weight:700; font-size:28px; color:var(--text);
+    padding:4px 2px;
+  }
+  .title-input-full::placeholder{ color:var(--dim); }
+
+  .full-editor-actions{display:flex; gap:8px; flex-shrink:0;}
+
+  .full-editor-meta-row{
+    display:flex; align-items:flex-start; gap:24px; flex-wrap:wrap;
+    padding:14px 24px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .full-editor-meta-row .tag-picker{ flex:1; min-width:240px; }
+  .full-editor-meta-row .meta-label{
+    font-family:var(--font-mono); font-size:11px; color:var(--dim); letter-spacing:0.05em; margin-bottom:6px; display:block;
+  }
+
+  .full-editor-textarea{
+    flex:1; width:100%; border:none; outline:none; resize:none;
+    background:var(--bg); color:var(--text);
+    font-family:var(--font-body); font-size:18px; line-height:32px;
+    padding:20px 40px;
+    /* 方格線背景：兩條 linear-gradient 疊出橫線+直線，32px 是每格的大小，
+       用 --grid-line 這個很暗的顏色，不會跟文字打架；
+       想要格子更大/更小，改下面 background-size 那個 32px 32px 就好（記得跟上面 line-height 搭配）*/
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:32px 32px;
+    background-attachment:local;
+  }
+
+  /* ---------- 標籤選擇器（取代原本打字輸入逗號分隔的做法）---------- */
   .tag-picker{display:flex; flex-direction:column; gap:8px;}
   .selected-tags{display:flex; flex-wrap:wrap; gap:6px;}
   .tag-chip-editable{
@@ -204,7 +247,12 @@
     background:none; border:none; color:var(--dim); cursor:pointer; font-size:13px; line-height:1; padding:2px;
   }
   .tag-chip-editable button:hover{color:var(--danger);}
-  .tag-add-row{position:relative;}
+  .tag-add-row{position:relative; max-width:360px;}
+  .tag-add-row input{
+    width:100%; background:var(--panel); border:1px solid var(--border-bright); color:var(--text);
+    padding:9px 12px; border-radius:5px; font-size:13px;
+  }
+  .tag-add-row input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
   .tag-suggestions{
     position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:10;
     background:var(--panel-alt); border:1px solid var(--border-bright); border-radius:6px;
@@ -215,70 +263,42 @@
   .tag-suggestion-item:hover{background:var(--bg);}
   .tag-suggestion-item.create-new{color:var(--accent); font-family:var(--font-mono); font-size:12px;}
 
-  .editor-row textarea{width:100%; min-height:440px; /* 一般（未放大）狀態下筆記內容框的高度 */ resize:vertical; line-height:1.6; font-family:var(--font-body);}
-
-  .textarea-wrap{position:relative; width:100%;}
-  .expand-btn{
-    position:absolute; top:8px; right:8px; z-index:2;
-    background:var(--panel-alt); border:1px solid var(--border-bright); color:var(--muted);
-    width:28px; height:28px; border-radius:5px; cursor:pointer; font-size:14px; line-height:1;
-    display:flex; align-items:center; justify-content:center;
-  }
-  .expand-btn:hover{color:var(--accent); border-color:var(--accent);}
-  .textarea-wrap textarea{ padding-right:44px; }
-
-  .expand-title-bar{ display:none; } /* 平常隱藏，只有放大模式才顯示這個筆記標題 */
-
-  /* 放大按鈕按下去之後，文字框變成蓋滿整個瀏覽器視窗（留 20px 邊界），
-     不是叫作業系統進入電腦全螢幕模式 */
-  .textarea-wrap.expanded{
-    position:fixed; inset:20px; /* 四邊各留 20px，改這個數字可以調邊界寬窄 */
-    z-index:300; width:auto; height:auto;
-    background:var(--panel); border:1px solid var(--border-bright); border-radius:10px;
-    display:flex; flex-direction:column; padding:0;
-  }
-  .textarea-wrap.expanded .expand-title-bar{
-    display:block; flex-shrink:0;
-    font-family:var(--font-display); font-weight:700; font-size:32px; color:var(--text);
-    padding:24px 60px 8px 24px;
-  }
-  .textarea-wrap.expanded textarea{
-    flex:1; width:100%; height:100%; min-height:0; resize:none;
-    font-size:20px; line-height:36px; padding:8px 60px 24px 24px; border-radius:10px;
-    background-color:var(--bg);
-    /* 方格線背景：兩條 linear-gradient 疊出橫線+直線，36px 是每格的大小，
-       想要格子更大/更小，改下面 background-size 那個 36px 36px 就好（記得跟上面 line-height 搭配）*/
-    background-image:
-      linear-gradient(var(--border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--border) 1px, transparent 1px);
-    background-size:36px 36px;
-    background-attachment:local;
-  }
-  .textarea-wrap.expanded .expand-btn{ top:20px; right:20px; }
-  .editor-row input:focus, .editor-row textarea:focus, .editor-row select:focus{
-    outline:2px solid var(--accent); outline-offset:1px;
-  }
   .color-swatches{display:flex; gap:8px; flex-wrap:wrap;}
   .swatch{
     width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid transparent;
   }
   .swatch.selected{border-color:var(--text);}
-  .editor-actions{display:flex; justify-content:space-between; gap:10px; margin-top:6px;}
-  .save-btn{
-    background:var(--accent); color:var(--accent-ink); border:none; font-weight:700;
-    font-family:var(--font-iansui); font-size:15px; padding:10px 18px; border-radius:6px; cursor:pointer;
-    flex:1;
-  }
-  .save-btn:hover{filter:brightness(1.08);}
-  .cancel-btn, .delete-btn{
+
+  .delete-btn, .cancel-btn{
     background:none; border:1px solid var(--border-bright); color:var(--muted);
     font-family:var(--font-mono); font-size:12px; padding:10px 16px; border-radius:6px; cursor:pointer;
   }
   .delete-btn:hover{color:var(--danger); border-color:var(--danger);}
   .cancel-btn:hover{color:var(--text);}
-  .panel-close-row{display:flex; justify-content:flex-end;}
-  .panel-close{background:none; border:none; color:var(--dim); font-size:20px; cursor:pointer;}
-  .panel-close:hover{color:var(--text);}
+  .save-btn{
+    background:var(--accent); color:var(--accent-ink); border:none; font-weight:700;
+    font-family:var(--font-iansui); font-size:14px; padding:10px 18px; border-radius:6px; cursor:pointer;
+  }
+  .save-btn:hover{filter:brightness(1.08);}
+
+  /* ---------- 小彈出視窗（新增專案 / 刪除確認用，取代 window.prompt/confirm）---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none;
+    align-items:center; justify-content:center; z-index:400;
+    padding:24px;
+  }
+  .overlay.show{display:flex;}
+  .mini-panel{
+    width:320px; max-width:90vw; background:var(--panel);
+    border:1px solid var(--border-bright); border-radius:10px;
+    padding:24px; display:flex; flex-direction:column; gap:14px;
+  }
+  .mini-panel input[type=text]{
+    width:100%; background:var(--bg); border:1px solid var(--border-bright); color:var(--text);
+    padding:10px 12px; border-radius:5px; font-size:14px;
+  }
+  .mini-panel input[type=text]:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .mini-panel-actions{display:flex; justify-content:flex-end; gap:10px;}
 
   .loading-screen{
     position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center;
@@ -329,58 +349,52 @@
         <div class="main-title" id="mainTitle">選擇一個專案</div>
         <div class="main-sub" id="mainSub"></div>
       </div>
-      <button class="new-note-btn" id="newNoteBtn" style="display:none;">+ 新增筆記</button>
+      <div class="main-header-actions">
+        <input type="text" id="searchInput" class="search-input" placeholder="搜尋標題或內容..." autocomplete="off" style="display:none;">
+        <button class="new-note-btn" id="newNoteBtn" style="display:none;">+ 新增筆記</button>
+      </div>
     </div>
     <div class="tag-filter-row" id="tagFilterRow"></div>
     <div class="note-grid" id="noteGrid"></div>
   </div>
 </div>
 
-<!-- EDITOR OVERLAY -->
-<div class="overlay" id="overlay">
-  <div class="editor-panel">
-    <div class="panel-close-row"><button class="panel-close" id="panelCloseBtn">×</button></div>
-    <div class="editor-row">
-      <input type="text" id="editTitle" class="title-input" placeholder="無標題筆記" autocomplete="off">
-    </div>
-    <div class="editor-row">
-      <label>內容</label>
-      <div class="textarea-wrap" id="textareaWrap">
-        <div class="expand-title-bar" id="expandTitleBar"></div>
-        <textarea id="editBody" placeholder="寫點什麼..."></textarea>
-        <button type="button" id="expandBtn" class="expand-btn" title="放大">⤢</button>
-      </div>
-    </div>
-    <div class="editor-row">
-      <label>標籤</label>
-      <div class="tag-picker" id="tagPicker">
-        <div class="selected-tags" id="selectedTags"></div>
-        <div class="tag-add-row">
-          <input type="text" id="tagAddInput" placeholder="輸入新標籤，或從下面選擇現有標籤" autocomplete="off">
-          <div class="tag-suggestions" id="tagSuggestions"></div>
-        </div>
-      </div>
-    </div>
-    <div class="editor-row">
-      <label>顏色</label>
-      <div class="color-swatches" id="colorSwatches"></div>
-    </div>
-    <div class="editor-actions">
+<!-- 全畫面編輯（新增/編輯筆記都在這裡，不再是小視窗） -->
+<div class="full-editor" id="fullEditor">
+  <div class="full-editor-topbar">
+    <button type="button" class="full-editor-close" id="fullEditorCloseBtn" title="關閉">×</button>
+    <input type="text" id="editTitle" class="title-input-full" placeholder="無標題筆記" autocomplete="off">
+    <div class="full-editor-actions">
       <button class="delete-btn" id="deleteNoteBtn">刪除</button>
       <button class="cancel-btn" id="cancelEditBtn">取消</button>
       <button class="save-btn" id="saveNoteBtn">儲存</button>
     </div>
   </div>
+  <div class="full-editor-meta-row">
+    <div class="tag-picker" id="tagPicker">
+      <span class="meta-label">標籤</span>
+      <div class="selected-tags" id="selectedTags"></div>
+      <div class="tag-add-row">
+        <input type="text" id="tagAddInput" placeholder="輸入新標籤，或從下面選擇現有標籤" autocomplete="off">
+        <div class="tag-suggestions" id="tagSuggestions"></div>
+      </div>
+    </div>
+    <div>
+      <span class="meta-label">顏色</span>
+      <div class="color-swatches" id="colorSwatches"></div>
+    </div>
+  </div>
+  <textarea id="editBody" class="full-editor-textarea" placeholder="寫點什麼..."></textarea>
 </div>
 
-<!-- MINI DIALOG (replaces native prompt/confirm popups) -->
+<!-- MINI DIALOG（新增專案 / 刪除確認，取代 window.prompt/confirm） -->
 <div class="overlay" id="miniDialogOverlay">
-  <div class="editor-panel" style="width:320px; max-width:90vw; gap:14px;">
+  <div class="mini-panel">
     <div id="miniDialogTitle" style="font-family:var(--font-display); font-weight:700; font-size:16px; color:var(--text); line-height:1.5;"></div>
-    <div class="editor-row" id="miniDialogInputRow">
+    <div id="miniDialogInputRow">
       <input type="text" id="miniDialogInput" placeholder="">
     </div>
-    <div class="editor-actions">
+    <div class="mini-panel-actions">
       <button class="cancel-btn" id="miniDialogCancel">取消</button>
       <button class="save-btn" id="miniDialogConfirm">確定</button>
     </div>
@@ -398,6 +412,7 @@ let currentProjectId = null;
 let activeTagFilter = null;
 let editingNoteId = null;
 let editingTags = []; // 目前編輯視窗裡已選的標籤（標籤選擇器用）
+let searchQuery = ''; // 搜尋框目前輸入的關鍵字
 
 let ghConfig = null; // { owner, repo, path, branch, token }
 let currentSha = null; // GitHub blob sha of the currently loaded file, null if file doesn't exist yet
@@ -522,23 +537,32 @@ function renderHeader(){
   const title = document.getElementById('mainTitle');
   const sub = document.getElementById('mainSub');
   const newBtn = document.getElementById('newNoteBtn');
+  const searchInput = document.getElementById('searchInput');
   if(!currentProjectId){
     title.textContent = '選擇或新增一個專案';
     sub.textContent = '';
     newBtn.style.display = 'none';
+    searchInput.style.display = 'none';
     return;
   }
   const proj = state.projects.find(p => p.id === currentProjectId);
   title.textContent = proj ? proj.name : '';
   sub.textContent = '全部筆記';
   newBtn.style.display = 'inline-block';
+  searchInput.style.display = 'block';
 }
 
 function getVisibleNotes(){
   if(!currentProjectId) return [];
+  const q = searchQuery.trim().toLowerCase();
   return state.notes.filter(n => {
     if(n.projectId !== currentProjectId) return false;
     if(activeTagFilter && !(n.tags || []).includes(activeTagFilter)) return false;
+    if(q){
+      const inTitle = (n.title || '').toLowerCase().includes(q);
+      const inBody = (n.body || '').toLowerCase().includes(q);
+      if(!inTitle && !inBody) return false;
+    }
     return true;
   });
 }
@@ -572,16 +596,20 @@ function renderNoteGrid(){
   }
   const notes = getVisibleNotes();
   if(notes.length === 0){
-    grid.innerHTML = '<div class="empty-state">這裡還沒有筆記，按右上角「+ 新增筆記」開始寫。</div>';
+    grid.innerHTML = searchQuery.trim()
+      ? '<div class="empty-state">找不到符合搜尋的筆記</div>'
+      : '<div class="empty-state">這裡還沒有筆記，按右上角「+ 新增筆記」開始寫。</div>';
     return;
   }
-  notes.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0)).forEach(n => {
+  // 釘選的筆記排最前面，其餘依更新時間新到舊排列
+  notes.sort((a,b) => ((b.pinned?1:0) - (a.pinned?1:0)) || ((b.updatedAt||0) - (a.updatedAt||0))).forEach(n => {
     const card = document.createElement('div');
     card.className = 'note-card';
     card.style.setProperty('--card-color', n.color || '#FFCE38');
     const d = n.updatedAt ? new Date(n.updatedAt) : new Date();
     const timeStr = d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate();
     card.innerHTML = `
+      <button type="button" class="pin-btn${n.pinned ? ' pinned' : ''}" title="${n.pinned ? '取消釘選' : '釘選'}">📌</button>
       <div class="note-card-title"></div>
       <div class="note-card-body"></div>
       <div class="note-card-tags"></div>
@@ -595,6 +623,13 @@ function renderNoteGrid(){
       s.className = 'mini-tag';
       s.textContent = '#' + t;
       tagsWrap.appendChild(s);
+    });
+    card.querySelector('.pin-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const noteRef = state.notes.find(x => x.id === n.id);
+      noteRef.pinned = !noteRef.pinned;
+      saveData();
+      renderNoteGrid();
     });
     card.addEventListener('click', () => openEditor(n.id));
     grid.appendChild(card);
@@ -629,12 +664,14 @@ function renderAll(){
 function selectProject(id){
   currentProjectId = id;
   activeTagFilter = null;
+  searchQuery = '';
+  document.getElementById('searchInput').value = '';
   renderAll();
 }
 
+// 開啟全畫面編輯：新增筆記傳 null，編輯現有筆記傳 note id
 function openEditor(noteId){
   editingNoteId = noteId;
-  collapseTextarea();
   const deleteBtn = document.getElementById('deleteNoteBtn');
   if(noteId){
     const n = state.notes.find(x => x.id === noteId);
@@ -653,12 +690,12 @@ function openEditor(noteId){
   document.getElementById('tagAddInput').value = '';
   renderTagChips();
   document.getElementById('tagSuggestions').classList.remove('show');
-  document.getElementById('overlay').classList.add('show');
+  document.getElementById('fullEditor').classList.add('show');
+  document.getElementById('editTitle').focus();
 }
 
 function closeEditor(){
-  document.getElementById('overlay').classList.remove('show');
-  collapseTextarea();
+  document.getElementById('fullEditor').classList.remove('show');
   editingNoteId = null;
 }
 
@@ -677,7 +714,7 @@ function saveNoteFromEditor(){
     n.updatedAt = Date.now();
   } else {
     state.notes.push({
-      id: uid(), projectId: currentProjectId, title, body, tags, color,
+      id: uid(), projectId: currentProjectId, title, body, tags, color, pinned: false,
       updatedAt: Date.now()
     });
   }
@@ -761,12 +798,21 @@ document.getElementById('tagAddInput').addEventListener('blur', () => {
   setTimeout(() => document.getElementById('tagSuggestions').classList.remove('show'), 150);
 });
 
+/* ---------------- search ---------------- */
+
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  searchQuery = e.target.value;
+  renderNoteGrid();
+});
 
 /* ---------------- mini dialog (replaces window.prompt / window.confirm) ---------------- */
 // 瀏覽器內建的 prompt()/confirm() 樣式沒辦法自訂、也擋不掉，
 // 所以自己做了這兩個函式，畫面用 #miniDialogOverlay 那個彈出視窗，
 // 用法是 await showPrompt(標題, placeholder) 或 await showConfirm(訊息)，
 // 用起來跟原生的 prompt/confirm 很像，但回傳的是 Promise，要搭配 async/await 使用
+// 注意：這個小彈出視窗只用在「新增專案」「刪除確認」這種簡短操作，
+// 跟筆記編輯畫面（全畫面）是分開的兩件事，點這個彈出視窗外面的暗色背景不會做任何事，
+// 一定要按「取消」或「確定」才會關閉。
 
 function showPrompt(title, placeholder){
   return new Promise((resolve) => {
@@ -850,39 +896,14 @@ document.getElementById('disconnectBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('newNoteBtn').addEventListener('click', () => openEditor(null));
-
-function collapseTextarea(){
-  const wrap = document.getElementById('textareaWrap');
-  wrap.classList.remove('expanded');
-  document.getElementById('expandBtn').textContent = '⤢';
-  document.getElementById('expandBtn').title = '放大';
-}
-
-document.getElementById('expandBtn').addEventListener('click', () => {
-  const wrap = document.getElementById('textareaWrap');
-  const btn = document.getElementById('expandBtn');
-  const nowExpanded = wrap.classList.toggle('expanded');
-  btn.textContent = nowExpanded ? '⤡' : '⤢';
-  btn.title = nowExpanded ? '縮小' : '放大';
-  if(nowExpanded){
-    const titleVal = document.getElementById('editTitle').value.trim();
-    document.getElementById('expandTitleBar').textContent = titleVal || '（無標題）';
-    document.getElementById('editBody').focus();
-  }
-});
-
-document.addEventListener('keydown', (e) => {
-  if(e.key === 'Escape' && document.getElementById('textareaWrap').classList.contains('expanded')){
-    collapseTextarea();
-  }
-});
-
-document.getElementById('panelCloseBtn').addEventListener('click', closeEditor);
+document.getElementById('fullEditorCloseBtn').addEventListener('click', closeEditor);
 document.getElementById('cancelEditBtn').addEventListener('click', closeEditor);
 document.getElementById('saveNoteBtn').addEventListener('click', saveNoteFromEditor);
-document.getElementById('overlay').addEventListener('click', (e) => {
-  if(e.target.id === 'overlay') saveNoteFromEditor();
-});
+
+// 注意：這裡刻意不綁「點編輯畫面空白處」的事件——
+// 之前複製筆記內容時很容易不小心點到旁邊，導致誤觸存檔/關閉，
+// 現在編輯畫面裡點哪裡都不會有動作，只有按上面「取消」「儲存」「×」才會離開。
+
 document.getElementById('deleteNoteBtn').addEventListener('click', async () => {
   if(!editingNoteId) return;
   if(await showConfirm('確定要刪除這則筆記嗎？')){
@@ -890,6 +911,13 @@ document.getElementById('deleteNoteBtn').addEventListener('click', async () => {
     saveData();
     closeEditor();
     renderAll();
+  }
+});
+
+// 全畫面編輯開著的時候，按 Esc 直接離開（等同「取消」，不會存檔）
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && document.getElementById('fullEditor').classList.contains('show')){
+    closeEditor();
   }
 });
 
